@@ -21,12 +21,13 @@ impl Message {
 }
 
 pub trait Messages {
+    fn delete(key: &str, ts: Option<u128>) -> Message;
     fn put(key: &str, data: &mut Vec<u8>, ts: Option<u128>) -> Message;
     fn ping() -> Message;
     fn pong() -> Message;
     fn connected() -> Message;
     fn get(key: &str, ts: Option<u128>) -> Message;
-    fn get_resp(data: Vec<u8>, ts: Option<u128>) -> Message;
+    fn keys(ts: Option<u128>) -> Message;
     fn recv(data: Option<Vec<u8>>, ts: Option<u128>) -> Message;
 }
 
@@ -85,24 +86,6 @@ impl Messages for Message {
             ts: ts,
         }
     }
-    fn get_resp(data: Vec<u8>, ts: Option<u128>) -> Message {
-        let ts = ts
-            .or(Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis(),
-            ))
-            .unwrap();
-
-        Message {
-            version: VERSION,
-            command: Command::GET,
-            length: data.len(),
-            data: data.into(),
-            ts: ts,
-        }
-    }
     fn put(key: &str, data: &mut Vec<u8>, ts: Option<u128>) -> Message {
         let ts = ts
             .or(Some(
@@ -145,6 +128,48 @@ impl Messages for Message {
             data: data,
         }
     }
+
+    fn keys(ts: Option<u128>) -> Message {
+        let ts = ts
+            .or(Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis(),
+            ))
+            .unwrap();
+
+        let data = Vec::<u8>::new();
+
+        Message {
+            version: VERSION,
+            command: Command::KEYS,
+            ts: ts,
+            length: data.len(),
+            data: data,
+        }
+    }
+
+    fn delete(key: &str, ts: Option<u128>) -> Message {
+        let ts = ts
+            .or(Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis(),
+            ))
+            .unwrap();
+
+        let data = key.as_bytes();
+
+        Message {
+            version: VERSION,
+            command: Command::DELETE,
+            ts: ts,
+            length: data.len(),
+            data: data.into(),
+        }
+    }
 }
 
 impl Default for Message {
@@ -172,6 +197,8 @@ pub enum Command {
     GET,
     PUT,
     RECV,
+    KEYS,
+    DELETE,
 }
 
 impl Into<Command> for u8 {
@@ -183,6 +210,8 @@ impl Into<Command> for u8 {
             4 => Command::GET,
             5 => Command::PUT,
             6 => Command::RECV,
+            7 => Command::KEYS,
+            8 => Command::DELETE,
             _ => panic!("Incorret enum value"),
         }
     }

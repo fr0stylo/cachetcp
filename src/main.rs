@@ -14,11 +14,17 @@ fn main() -> std::io::Result<()> {
         let cc = c.clone();
 
         let mut i = 0;
+        c.connected().unwrap();
         loop {
+            println!("{:?}", cc.keys()?);
             println!("{:?}", cc.put("1", vec![i])?);
-            sleep(Duration::from_secs(rand::thread_rng().gen_range(1..10)));
+            sleep(Duration::from_millis(
+                rand::thread_rng().gen_range(10..1000),
+            ));
             println!("{:?}", cc.get("1")?);
-            sleep(Duration::from_secs(rand::thread_rng().gen_range(1..10)));
+            sleep(Duration::from_millis(
+                rand::thread_rng().gen_range(10..1000),
+            ));
             i = i + 1;
         }
     } else {

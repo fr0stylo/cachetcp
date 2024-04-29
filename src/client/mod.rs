@@ -3,8 +3,9 @@ use std::{
     collections::HashMap,
     io::{BufWriter, Error, ErrorKind},
     net::TcpStream,
+    os::linux::net::TcpStreamExt,
     sync::{
-        mpsc::{sync_channel, SyncSender},
+        mpsc::{channel, Sender},
         Arc, Mutex,
     },
     thread,
@@ -13,7 +14,7 @@ use std::{
 
 use crate::proto::{self, Messages};
 
-type ReceverQueue = Arc<Mutex<HashMap<u128, SyncSender<proto::Message>>>>;
+type ReceverQueue = Arc<Mutex<HashMap<u128, Sender<proto::Message>>>>;
 #[derive(Debug)]
 pub struct Client {
     sock: TcpStream,
@@ -25,10 +26,8 @@ impl Client {
     pub fn new(addr: &str) -> Self {
         let sck = TcpStream::connect(addr).unwrap();
         sck.set_nodelay(true).unwrap();
-        sck.set_nonblocking(false).unwrap();
-        let q = Arc::new(Mutex::new(
-            HashMap::<u128, SyncSender<proto::Message>>::new(),
-        ));
+        sck.set_quickack(true).unwrap();
+        let q = Arc::new(Mutex::new(HashMap::<u128, Sender<proto::Message>>::new()));
         let qq = q.clone();
         let tsck = sck.try_clone().unwrap();
 
@@ -41,7 +40,6 @@ impl Client {
         return Client {
             sock: sck,
             queue: q,
-            // t: t,
         };
     }
 
@@ -54,12 +52,18 @@ impl Client {
         Ok(())
     }
 
+    pub fn connected(&self) -> Result<Vec<u8>, Error> {
+        let msg = proto::Message::connected();
+
+        self.rpc(msg)
+    }
+
     fn rpc(&self, msg: proto::Message) -> Result<Vec<u8>, Error> {
         let t = SystemTime::now();
 
         let mut msg = msg.clone();
         let mut ww = self.sock.try_clone().unwrap();
-        let (tx, rx) = sync_channel::<proto::Message>(1);
+        let (tx, rx) = channel::<proto::Message>();
 
         {
             self.queue.lock().unwrap().insert(msg.ts, tx);
@@ -67,16 +71,13 @@ impl Client {
 
         proto::marshal(&mut msg, &mut ww)?;
 
-        let result = match rx.recv_timeout(Duration::from_secs(10)) {
+        let result = match rx.recv_timeout(Duration::from_secs(1)) {
             Ok(result) => {
                 print!("{:?}", t.elapsed());
 
                 Ok(result.data)
             }
-            Err(e) => {
-                eprintln!("{}", e);
-                Err(Error::new(ErrorKind::Unsupported, "recv error"))
-            }
+            Err(e) => Err(Error::new(ErrorKind::TimedOut, e)),
         };
 
         self.queue.lock().unwrap().remove(&msg.ts);
@@ -101,13 +102,36 @@ impl Client {
 
         self.rpc(msg)
     }
+
+    pub fn keys(&self) -> Result<Vec<String>, Error> {
+        let mut rnd = rand::thread_rng();
+
+        let msg = proto::Message::keys(rnd.gen());
+
+        match self.rpc(msg) {
+            Ok(data) => {
+                let s = String::from_utf8(data).unwrap();
+                let s = s.split("||").map(|x| x.to_owned()).collect::<Vec<String>>();
+                Ok(s)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn delete(&self, key: &str) -> Result<(), Error> {
+        let mut rnd = rand::thread_rng();
+
+        let msg = proto::Message::delete(key, rnd.gen());
+
+        match self.rpc(msg) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 fn message_handle(mut sock: TcpStream, q: ReceverQueue) -> std::io::Result<()> {
     let mut binding = sock.try_clone().unwrap();
-    // let mut read = BufReader::new(&mut sock);
-    // let mut w = BufWriter::new(&mut binding);
-    proto::marshal(&mut proto::Message::connected(), &mut sock)?;
 
     loop {
         match proto::unmarshal(&mut binding) {

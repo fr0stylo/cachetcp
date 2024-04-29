@@ -62,7 +62,7 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                 match msg.command {
                     proto::Command::PING => {
                         let mut ss = stream.try_clone().unwrap();
-                        let _ = thread::spawn(move || {
+                        let _ = thread::Builder::new().spawn(move || {
                             sleep(Duration::from_secs(5));
                             proto::marshal(&mut proto::Message::pong(), &mut ss).unwrap();
                         });
@@ -70,13 +70,16 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                     }
                     proto::Command::PONG => {
                         let mut ss = stream.try_clone().unwrap();
-                        let _ = thread::spawn(move || {
+                        let _ = thread::Builder::new().spawn(move || {
                             sleep(Duration::from_secs(5));
                             proto::marshal(&mut proto::Message::pong(), &mut ss).unwrap();
                         }); // sleep(Duration::from_secs(1));
                     }
                     proto::Command::CONNECTED => {
-                        proto::marshal(&mut proto::Message::ping(), &mut stream)?
+                        proto::marshal(
+                            &mut proto::Message::recv(Option::None, Option::Some(msg.ts)),
+                            &mut stream,
+                        )?;
                     }
                     proto::Command::GET => {
                         let key = String::from_utf8(msg.data).unwrap();
@@ -100,6 +103,34 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                             .lock()
                             .unwrap()
                             .insert(key.to_owned(), data.last().unwrap().clone().into());
+
+                        proto::marshal(
+                            &mut proto::Message::recv(Option::None, Option::Some(msg.ts)),
+                            &mut stream,
+                        )?
+                    }
+                    proto::Command::KEYS => {
+                        let keys: Vec<String> = cache_entity
+                            .lock()
+                            .unwrap()
+                            .keys()
+                            .map(|x| x.clone())
+                            .collect();
+
+                        let keys = keys.join("||");
+
+                        proto::marshal(
+                            &mut proto::Message::recv(
+                                Option::Some(keys.into_bytes()),
+                                Option::Some(msg.ts),
+                            ),
+                            &mut stream,
+                        )?
+                    }
+                    proto::Command::DELETE => {
+                        let key = String::from_utf8(msg.data).unwrap();
+
+                        cache_entity.lock().unwrap().remove(&key);
 
                         proto::marshal(
                             &mut proto::Message::recv(Option::None, Option::Some(msg.ts)),
