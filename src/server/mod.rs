@@ -97,12 +97,12 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                     proto::Command::PUT => {
                         let data = String::from_utf8(msg.data).unwrap();
                         let data = data.split("||").collect::<Vec<&str>>();
-                        let key = data.first().unwrap().clone();
+                        let key = data.first().unwrap().to_owned();
 
                         cache_entity
                             .lock()
                             .unwrap()
-                            .insert(key.to_owned(), data.last().unwrap().clone().into());
+                            .insert(key.to_owned(), data.last().unwrap().to_owned().into());
 
                         proto::marshal(
                             &mut proto::Message::recv(Option::None, Option::Some(msg.ts)),
