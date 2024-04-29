@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     io::{BufWriter, Error, ErrorKind},
     net::TcpStream,
-    os::linux::net::TcpStreamExt,
     sync::{
         mpsc::{channel, Sender},
         Arc, Mutex,
@@ -19,14 +18,12 @@ type ReceverQueue = Arc<Mutex<HashMap<u128, Sender<proto::Message>>>>;
 pub struct Client {
     sock: TcpStream,
     queue: ReceverQueue,
-    // t: JoinHandle<std::io::Result<()>>,
 }
 
 impl Client {
     pub fn new(addr: &str) -> Self {
         let sck = TcpStream::connect(addr).unwrap();
         sck.set_nodelay(true).unwrap();
-        sck.set_quickack(true).unwrap();
         let q = Arc::new(Mutex::new(HashMap::<u128, Sender<proto::Message>>::new()));
         let qq = q.clone();
         let tsck = sck.try_clone().unwrap();
