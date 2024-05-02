@@ -9,6 +9,8 @@ use std::{
 
 use crate::proto::{self, Messages};
 
+pub mod nonblocking;
+
 type Cache = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
 #[derive(Debug)]
@@ -82,7 +84,7 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                         )?;
                     }
                     proto::Command::GET => {
-                        let key = String::from_utf8(msg.data).unwrap();
+                        let key = String::from_utf8(msg.data.unwrap()).unwrap();
 
                         let data = match cache_entity.lock().unwrap().get(&key) {
                             Some(x) => x.to_owned(),
@@ -95,7 +97,7 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                         )?
                     }
                     proto::Command::PUT => {
-                        let data = String::from_utf8(msg.data).unwrap();
+                        let data = String::from_utf8(msg.data.unwrap()).unwrap();
                         let data = data.split("||").collect::<Vec<&str>>();
                         let key = data.first().unwrap().to_owned();
 
@@ -128,7 +130,7 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                         )?
                     }
                     proto::Command::DELETE => {
-                        let key = String::from_utf8(msg.data).unwrap();
+                        let key = String::from_utf8(msg.data.unwrap()).unwrap();
 
                         cache_entity.lock().unwrap().remove(&key);
 

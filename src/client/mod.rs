@@ -72,7 +72,7 @@ impl Client {
             Ok(result) => {
                 print!("{:?}", t.elapsed());
 
-                Ok(result.data)
+                Ok(result.data.or(Some(Vec::new().to_owned())).unwrap())
             }
             Err(e) => Err(Error::new(ErrorKind::TimedOut, e)),
         };

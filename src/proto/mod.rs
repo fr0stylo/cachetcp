@@ -3,6 +3,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub mod nonblocking;
+
 static VERSION: u8 = 1;
 
 #[derive(Clone, Debug)]
@@ -11,7 +13,7 @@ pub struct Message {
     pub command: Command,
     pub ts: u128,
     length: usize,
-    pub data: Vec<u8>,
+    pub data: Option<Vec<u8>>,
 }
 
 impl Message {
@@ -37,7 +39,7 @@ impl Messages for Message {
             version: VERSION,
             command: Command::PING,
             length: 0,
-            data: vec![0, 0],
+            data: Option::None,
             ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -49,7 +51,7 @@ impl Messages for Message {
             version: VERSION,
             command: Command::PONG,
             length: 0,
-            data: vec![0, 0],
+            data: Option::None,
             ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -61,7 +63,7 @@ impl Messages for Message {
             version: VERSION,
             command: Command::CONNECTED,
             length: 0,
-            data: vec![0, 0],
+            data: Option::None,
             ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -82,7 +84,7 @@ impl Messages for Message {
             version: VERSION,
             command: Command::GET,
             length: key.len(),
-            data: key.into(),
+            data: Some(key.into()),
             ts: ts,
         }
     }
@@ -105,7 +107,7 @@ impl Messages for Message {
             command: Command::PUT,
             ts: ts,
             length: buf.len(),
-            data: buf,
+            data: Some(buf),
         }
     }
     fn recv(data: Option<Vec<u8>>, ts: Option<u128>) -> Message {
@@ -125,7 +127,7 @@ impl Messages for Message {
             command: Command::RECV,
             ts: ts,
             length: data.len(),
-            data: data,
+            data: Some(data),
         }
     }
 
@@ -146,7 +148,7 @@ impl Messages for Message {
             command: Command::KEYS,
             ts: ts,
             length: data.len(),
-            data: data,
+            data: Some(data),
         }
     }
 
@@ -167,7 +169,7 @@ impl Messages for Message {
             command: Command::DELETE,
             ts: ts,
             length: data.len(),
-            data: data.into(),
+            data: Some(data.into()),
         }
     }
 }
@@ -178,7 +180,7 @@ impl Default for Message {
             version: 0,
             command: Command::default(),
             length: 0,
-            data: vec![0],
+            data: None,
             ts: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -229,13 +231,11 @@ impl Default for Command {
     }
 }
 
-pub fn unmarshal(reader: &mut dyn Read) -> Result<Message, Error> {
-    let mut reader = BufReader::new(reader);
+pub fn unmarshal_raw(reader: &mut dyn Read) -> Result<Message, Error> {
     let mut msg = Message::default();
 
     let mut buf = [0; 28];
     reader.read_exact(&mut buf)?;
-
     if buf[0..2].ne(&[225, 225]) {
         return Err(Error::new(ErrorKind::Unsupported, "empty"));
     }
@@ -275,22 +275,37 @@ pub fn unmarshal(reader: &mut dyn Read) -> Result<Message, Error> {
     reader.read_exact(buf)?;
     // let mut v: Vec<u8> = vec![0];
     // reader.read_to_end(&mut v);
-    msg.data = buf.try_into().unwrap();
+    msg.data = Some(buf.try_into().unwrap());
 
     return Ok(msg);
 }
 
-pub fn marshal(msg: &mut Message, w: &mut dyn Write) -> Result<(), Error> {
-    let mut w = BufWriter::new(w);
+pub fn unmarshal(reader: &mut dyn Read) -> Result<Message, Error> {
+    let mut reader = BufReader::new(reader);
+
+    unmarshal_raw(&mut reader)
+}
+
+pub fn marshal_raw(msg: &mut Message, w: &mut dyn Write) -> Result<(), Error> {
     w.write(&[225, 225])?;
     w.write(&msg.version.to_be_bytes())?;
 
     let cmd: u8 = msg.command.into();
     w.write(&[cmd])?;
     w.write(&msg.ts.to_be_bytes())?;
-
     w.write(&msg.length.to_be_bytes())?;
-    w.write(&msg.data)?;
+    match &msg.data {
+        Some(x) => {
+            w.write(x)?;
+        }
+        None => {}
+    }
 
     Ok(())
+}
+
+pub fn marshal(msg: &mut Message, w: &mut dyn Write) -> Result<(), Error> {
+    let mut w = BufWriter::new(w);
+
+    marshal_raw(msg, &mut w)
 }
