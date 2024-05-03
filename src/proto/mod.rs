@@ -18,7 +18,7 @@ pub struct Message {
 
 impl Message {
     pub fn separator() -> Vec<u8> {
-        "||".into()
+        vec![0]
     }
 }
 
@@ -97,7 +97,7 @@ impl Messages for Message {
                     .as_millis(),
             ))
             .unwrap();
-
+        println!("{:?}", data);
         let mut buf: Vec<u8> = key.into();
         buf.append(&mut Message::separator());
         buf.append(data);
@@ -308,4 +308,14 @@ pub fn marshal(msg: &mut Message, w: &mut dyn Write) -> Result<(), Error> {
     let mut w = BufWriter::new(w);
 
     marshal_raw(msg, &mut w)
+}
+
+pub fn resolve_pair(input: Vec<u8>) -> Vec<Vec<u8>> {
+    input.into_iter().fold(Vec::new(), |mut acc, x| {
+        if x == 0 || acc.is_empty() {
+            acc.push(Vec::new());
+        }
+        acc.last_mut().unwrap().push(x);
+        acc
+    })
 }

@@ -14,6 +14,7 @@ use std::{
 use crate::proto::{self, Messages};
 
 type ReceverQueue = Arc<Mutex<HashMap<u128, Sender<proto::Message>>>>;
+
 #[derive(Debug)]
 pub struct Client {
     sock: TcpStream,
@@ -26,6 +27,7 @@ impl Client {
         sck.set_nodelay(true).unwrap();
         let q = Arc::new(Mutex::new(HashMap::<u128, Sender<proto::Message>>::new()));
         let qq = q.clone();
+
         let tsck = sck.try_clone().unwrap();
 
         let _ = thread::Builder::new()
@@ -107,9 +109,12 @@ impl Client {
 
         match self.rpc(msg) {
             Ok(data) => {
-                let s = String::from_utf8(data).unwrap();
-                let s = s.split("||").map(|x| x.to_owned()).collect::<Vec<String>>();
-                Ok(s)
+                let pairs: Vec<String> = proto::resolve_pair(data)
+                    .into_iter()
+                    .map(|x| String::from_utf8(x.to_owned()).unwrap().to_owned())
+                    .collect();
+
+                Ok(pairs)
             }
             Err(e) => Err(e),
         }
@@ -134,6 +139,7 @@ fn message_handle(mut sock: TcpStream, q: ReceverQueue) -> std::io::Result<()> {
         match proto::unmarshal(&mut binding) {
             Ok(msg) => match msg.command {
                 proto::Command::PING => {
+                    println!("{:?}", msg);
                     proto::marshal(&mut proto::Message::pong(), &mut sock)?;
                 }
                 proto::Command::RECV => match q.lock().unwrap().get(&msg.ts) {

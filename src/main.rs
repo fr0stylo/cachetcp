@@ -1,9 +1,6 @@
 use std::{env, sync::Arc, thread::sleep, time::Duration};
 
-use cachetcp::{
-    client,
-    server,
-};
+use cachetcp::{client, server};
 use rand::Rng;
 
 #[tokio::main]
@@ -15,20 +12,21 @@ async fn main() -> std::io::Result<()> {
     if args.len() > 1 {
         let c = client::Client::new(addr);
         let c = Arc::new(c);
-        let cc = c.clone();
+        let cc: Arc<client::Client> = c.clone();
 
-        let mut i = 0;
+        let mut i: u16 = 0;
         c.connected().unwrap();
-    
+
         loop {
             println!("{:?}", cc.keys()?);
-            println!("{:?}", cc.put("1", vec![i])?);
+            let s = i.to_be_bytes();
+            println!("{:?}", cc.put("1", s.into())?);
             sleep(Duration::from_millis(
-                rand::thread_rng().gen_range(10..1000),
+                rand::thread_rng().gen_range(10..50),
             ));
             println!("{:?}", cc.get("1")?);
             sleep(Duration::from_millis(
-                rand::thread_rng().gen_range(10..1000),
+                rand::thread_rng().gen_range(10..50),
             ));
             i = i + 1;
         }
