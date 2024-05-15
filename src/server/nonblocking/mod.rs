@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use tokio::{
     net::TcpListener,
@@ -6,28 +6,37 @@ use tokio::{
     time::interval,
 };
 
-use crate::proto::{self, Messages};
+use crate::{
+    proto::{self, Messages},
+    storage::{storage::Storage, Cache},
+    wal::{WalWritter, WriteAheadLog},
+};
 
-type Cache = Arc<Mutex<HashMap<String, Vec<u8>>>>;
+// type Cache = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
 #[derive(Debug)]
 pub struct Server {
     listener: TcpListener,
-    cache: Cache, // clients: Vec<JoinHandle<()>>,
+    cache: Storage, // clients: Vec<JoinHandle<()>>,
+    wal: WriteAheadLog
 }
 
 impl Server {
-    pub async fn new(addr: &str) -> Self {
+    pub async fn new(addr: &str, cc: Storage) -> Self {
         let listener = TcpListener::bind(addr).await.expect("failed to bind port");
+        let mut wal = WriteAheadLog::new("./test.log").await;
 
         Server {
             listener: listener,
-            cache: Arc::new(Mutex::new(HashMap::<String, Vec<u8>>::new())),
+            cache: cc,
+            wal: wal,
         }
     }
 
-    pub async fn start_recv(&self) -> std::io::Result<()> {
+    pub async fn start_recv(&mut self) -> std::io::Result<()> {
         loop {
+            let waltx = self.wal.tx().clone();
+            let walw = WalWritter::new(waltx);
             let (mut stream, _sck) = self.listener.accept().await?;
 
             let cc = self.cache.clone();
@@ -61,40 +70,41 @@ impl Server {
                                         proto::Command::GET => {
                                             let key = String::from_utf8(msg.data.unwrap()).unwrap();
 
-                                            let data = match cc.lock().await.get(&key) {
+                                            let data = match cc.read(key).await {
                                                 Some(x) => x.to_owned(),
                                                 None => Vec::<u8>::new(),
                                             };
                                             let _ = tx.send(proto::Message::recv(Option::Some(data), Option::Some(msg.ts)));
                                         }
                                         proto::Command::PUT => {
+                                            let msgg = msg.clone();
                                             let parts = proto::resolve_pair(msg.data.unwrap());
 
                                             let key = String::from_utf8(parts.first().unwrap().to_vec()).unwrap();
 
-                                            cc
-                                                .lock()
-                                                .await
-                                                .insert(key.to_owned(), parts.last().unwrap().to_owned().into());
+                                            tokio::join!(
+                                                cc.write(key.to_owned(), parts.last().unwrap().to_owned().into()),
+                                            );
+
+                                            walw.clone().write(&msgg);
 
                                             let _ = tx.send(proto::Message::recv(Option::None, Option::Some(msg.ts)));
                                         }
                                         proto::Command::KEYS => {
                                             let keys: Vec<String> = cc
-                                                .lock()
-                                                .await
                                                 .keys()
+                                                .await
                                                 .map(|x| x.clone())
-                                                .collect();
+                                                .unwrap();
 
-                                            let keys = keys.join("||");
+                                            let keys = keys.join("\0");
 
                                             let _ = tx.send(proto::Message::recv(Option::Some(keys.into_bytes()), Option::Some(msg.ts)));
                                         }
                                         proto::Command::DELETE => {
                                             let key = String::from_utf8(msg.data.unwrap()).unwrap();
 
-                                            cc.lock().await.remove(&key);
+                                            cc.delete(key).await;
 
                                             let _ = tx.send(proto::Message::recv(Option::None, Option::Some(msg.ts)));
                                         }

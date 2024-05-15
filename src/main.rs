@@ -1,6 +1,6 @@
 use std::{env, sync::Arc, thread::sleep, time::Duration};
 
-use cachetcp::{client, server};
+use cachetcp::{client, server, storage::storage::Storage};
 use rand::Rng;
 
 #[tokio::main]
@@ -21,17 +21,15 @@ async fn main() -> std::io::Result<()> {
             println!("{:?}", cc.keys()?);
             let s = i.to_be_bytes();
             println!("{:?}", cc.put("1", s.into())?);
-            sleep(Duration::from_millis(
-                rand::thread_rng().gen_range(10..50),
-            ));
+            sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             println!("{:?}", cc.get("1")?);
-            sleep(Duration::from_millis(
-                rand::thread_rng().gen_range(10..50),
-            ));
+            sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             i = i + 1;
         }
     } else {
-        server::nonblocking::Server::new(addr)
+        let storage = Storage::new();
+
+        server::nonblocking::Server::new(addr, storage)
             .await
             .start_recv()
             .await?;
