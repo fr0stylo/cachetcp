@@ -5,7 +5,7 @@ use std::{
 
 pub mod nonblocking;
 
-static VERSION: u8 = 1;
+pub static VERSION: u8 = 1;
 
 #[derive(Clone, Debug)]
 pub struct Message {

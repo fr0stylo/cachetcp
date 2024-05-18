@@ -1,34 +1,26 @@
-use std::{
-    io::{Error, ErrorKind},
-    mem::size_of,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{io::Error, mem::size_of, pin::Pin};
 
 use tokio::{
     fs::{File, OpenOptions},
-    io::AsyncWriteExt,
-    sync::broadcast::{channel, Receiver, Sender},
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::Mutex,
 };
 
-use crate::proto;
+use crate::proto::{self, Messages};
 
 #[derive(Debug)]
 
 pub struct WriteAheadLog {
-    fw: Pin<Box<File>>,
+    fw: Mutex<Pin<Box<File>>>,
     fr: Pin<Box<File>>,
-    tx: Sender<proto::Message>,
-    rx: Receiver<proto::Message>,
-}
-
-trait WAL {
-    fn push(msg: proto::Message) -> Result<(), Error>;
+    tx: UnboundedSender<proto::Message>,
+    rx: UnboundedReceiver<proto::Message>,
 }
 
 impl WriteAheadLog {
     pub async fn new(path: &str) -> Self {
-        let fw = Box::pin(
+        let fw = Mutex::new(Box::pin(
             OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -36,11 +28,11 @@ impl WriteAheadLog {
                 .open(path)
                 .await
                 .unwrap(),
-        );
+        ));
 
         let fr = Box::pin(OpenOptions::new().read(true).open(path).await.unwrap());
 
-        let (tx, rx) = channel::<proto::Message>(19);
+        let (tx, rx) = unbounded_channel::<proto::Message>();
 
         Self { fw, fr, tx, rx }
 
@@ -54,48 +46,108 @@ impl WriteAheadLog {
 
     pub async fn write(&mut self) -> Result<(), Error> {
         match self.rx.recv().await {
-            Ok(msg) => self.add_to_log(msg).await,
-            Err(_) => Err(Error::new(ErrorKind::UnexpectedEof, "somthing wong")),
+            Some(msg) => {
+                let parts = proto::resolve_pair(msg.data.unwrap());
+
+                let key = String::from_utf8(parts.first().unwrap().to_vec()).unwrap();
+
+                self.write_to_log(&key, parts.last().unwrap().to_owned().into(), msg.command)
+                    .await
+            }
+            None => Ok(()),
         }
     }
 
-    pub async fn add_to_log(&self, log: proto::Message) -> Result<(), Error> {
-        let mut log = log.clone();
-        proto::nonblocking::marshal(&mut log, Box::pin(self.fw.try_clone().await.unwrap())).await
-    }
+    // pub async fn add_to_log(&self, log: proto::Message) -> Result<(), Error> {
+    //     let mut log = log.clone();
+    //     proto::nonblocking::marshal(
+    //         &mut log,
+    //         Box::pin(self.fw.lock().await.try_clone().await.unwrap()),
+    //     )
+    //     .await
+    // }
 
-    pub async fn write_to_log(&self, key: &str, data: Vec<u8>) -> Result<(), Error> {
+    pub async fn write_to_log(
+        &self,
+        key: &str,
+        data: Vec<u8>,
+        cmd: proto::Command,
+    ) -> Result<(), Error> {
         let key_length = key.len();
         let data_length = data.len();
-
-        let len = size_of::<usize>();
-        let full_length = len * 2 + key_length + data_length;
-
+        println!("{:?}, {:?}", key_length, data_length);
+        // let len = size_of::<usize>();
+        // let full_length = 8 * 2 + 1 + key_length + data_length;
+        let cmd: &[u8; 1] = &[cmd.into()];
         let mut buf = Vec::<u8>::new();
-        buf.extend(&full_length.to_be_bytes());
+        buf.extend(&key_length.to_be_bytes());
         buf.extend(&data_length.to_be_bytes());
+        buf.extend(cmd);
         buf.extend(key.as_bytes());
         buf.extend(data);
+        println!("{:?}", buf);
 
-        self.fw.try_clone().await.unwrap().write_all(&buf).await
+        self.fw
+            .lock()
+            .await
+            .try_clone()
+            .await
+            .unwrap()
+            .write_all(&buf)
+            .await?;
+        self.fw
+            .lock()
+            .await
+            .try_clone()
+            .await
+            .unwrap()
+            .flush()
+            .await
     }
 
     pub async fn read_log_entry(&self) -> Result<proto::Message, Error> {
-        proto::nonblocking::unmarshal(Box::pin(self.fr.try_clone().await.unwrap())).await
+        let mut reader = self.fr.try_clone().await.unwrap();
+
+        let key_len = reader.read_u64().await?;
+        let data_len = reader.read_u64().await?;
+        let mut cmd: [u8; 1] = [0];
+        reader.read_exact(&mut cmd).await?;
+
+        println!("{:?}", key_len);
+        println!("{:?}", data_len);
+        println!("{:?}", cmd);
+
+        let mut key: Vec<u8> = vec![0, key_len.try_into().unwrap()];
+        let mut key = key.as_mut_slice();
+        println!("{:?}", key.len());
+        reader.read_exact(&mut key).await?;
+        println!("{:?}", key);
+
+        let mut data: Vec<u8> = vec![0, data_len.try_into().unwrap()];
+        let mut data = data.as_mut_slice();
+        println!("{:?}", data.len());
+        reader.read_exact(&mut data).await?;
+        println!("{:?}", data);
+
+        let key = String::from_utf8(key.to_vec()).unwrap();
+
+        Ok(proto::Message::put(&key, &mut data.to_vec(), None))
+
+        // proto::nonblocking::unmarshal(Box::pin(self.fr.try_clone().await.unwrap())).await
     }
 
-    pub fn tx(&mut self) -> Sender<proto::Message> {
+    pub fn tx(&mut self) -> UnboundedSender<proto::Message> {
         self.tx.clone()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct WalWritter {
-    tx: Sender<proto::Message>,
+    tx: UnboundedSender<proto::Message>,
 }
 
 impl WalWritter {
-    pub fn new(tx: Sender<proto::Message>) -> Self {
+    pub fn new(tx: UnboundedSender<proto::Message>) -> Self {
         Self { tx }
     }
 

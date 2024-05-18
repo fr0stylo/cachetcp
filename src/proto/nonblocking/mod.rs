@@ -52,7 +52,7 @@ pub async fn unmarshal<T: AsyncRead>(mut reader: Pin<Box<T>>) -> Result<Message,
     reader.read_exact(buf).await?;
     // let mut v: Vec<u8> = vec![0];
     // reader.read_to_end(&mut v);
-    msg.data = Some(buf.try_into().unwrap());
+    msg.data = Some(buf.to_vec());
 
     return Ok(msg);
 }
@@ -68,7 +68,7 @@ pub async fn marshal<T: AsyncWrite>(msg: &mut Message, mut w: Pin<Box<T>>) -> Re
     buf.write(&msg.length.to_be_bytes()).await?;
     match &msg.data {
         Some(x) => {
-            buf.write(x.as_slice()).await?;
+            buf.write(x).await?;
         }
         None => {}
     }
