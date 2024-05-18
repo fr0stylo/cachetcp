@@ -77,3 +77,4 @@ pub async fn marshal<T: AsyncWrite>(msg: &mut Message, mut w: Pin<Box<T>>) -> Re
 
     Ok(())
 }
+

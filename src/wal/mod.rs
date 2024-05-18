@@ -1,13 +1,23 @@
-use std::{io::Error, mem::size_of, pin::Pin};
+use std::{
+    error,
+    io::{Error, ErrorKind},
+    mem::size_of,
+    pin::Pin,
+};
 
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    sync::Mutex,
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    sync::{
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
 };
 
-use crate::proto::{self, Messages};
+use crate::{
+    proto::{self, Messages},
+    storage::{storage::Storage, Cache},
+};
 
 #[derive(Debug)]
 
@@ -35,13 +45,6 @@ impl WriteAheadLog {
         let (tx, rx) = unbounded_channel::<proto::Message>();
 
         Self { fw, fr, tx, rx }
-
-        // let mut ss = Arc::new(s);
-        // tokio::spawn(async move {
-        //     loop {
-        //         ss.write();
-        //     }
-        // });
     }
 
     pub async fn write(&mut self) -> Result<(), Error> {
@@ -58,15 +61,6 @@ impl WriteAheadLog {
         }
     }
 
-    // pub async fn add_to_log(&self, log: proto::Message) -> Result<(), Error> {
-    //     let mut log = log.clone();
-    //     proto::nonblocking::marshal(
-    //         &mut log,
-    //         Box::pin(self.fw.lock().await.try_clone().await.unwrap()),
-    //     )
-    //     .await
-    // }
-
     pub async fn write_to_log(
         &self,
         key: &str,
@@ -75,17 +69,15 @@ impl WriteAheadLog {
     ) -> Result<(), Error> {
         let key_length = key.len();
         let data_length = data.len();
-        println!("{:?}, {:?}", key_length, data_length);
-        // let len = size_of::<usize>();
-        // let full_length = 8 * 2 + 1 + key_length + data_length;
+
         let cmd: &[u8; 1] = &[cmd.into()];
         let mut buf = Vec::<u8>::new();
+
         buf.extend(&key_length.to_be_bytes());
         buf.extend(&data_length.to_be_bytes());
         buf.extend(cmd);
         buf.extend(key.as_bytes());
         buf.extend(data);
-        println!("{:?}", buf);
 
         self.fw
             .lock()
@@ -94,46 +86,59 @@ impl WriteAheadLog {
             .await
             .unwrap()
             .write_all(&buf)
-            .await?;
-        self.fw
-            .lock()
-            .await
-            .try_clone()
-            .await
-            .unwrap()
-            .flush()
             .await
     }
 
-    pub async fn read_log_entry(&self) -> Result<proto::Message, Error> {
+    pub async fn read_log_entry(&self) -> Result<Option<proto::Message>, Error> {
         let mut reader = self.fr.try_clone().await.unwrap();
-
+        let pos = reader.stream_position().await?;
+        let len = reader.metadata().await.unwrap().len();
+        if pos == len {
+            return Ok(None);
+        }
         let key_len = reader.read_u64().await?;
         let data_len = reader.read_u64().await?;
-        let mut cmd: [u8; 1] = [0];
+        let mut cmd = vec![0u8; 1];
         reader.read_exact(&mut cmd).await?;
 
-        println!("{:?}", key_len);
-        println!("{:?}", data_len);
-        println!("{:?}", cmd);
-
-        let mut key: Vec<u8> = vec![0, key_len.try_into().unwrap()];
-        let mut key = key.as_mut_slice();
-        println!("{:?}", key.len());
+        let mut key = vec![0u8; key_len.try_into().unwrap()];
         reader.read_exact(&mut key).await?;
-        println!("{:?}", key);
 
-        let mut data: Vec<u8> = vec![0, data_len.try_into().unwrap()];
-        let mut data = data.as_mut_slice();
-        println!("{:?}", data.len());
+        let mut data = vec![0u8; data_len.try_into().unwrap()];
         reader.read_exact(&mut data).await?;
-        println!("{:?}", data);
 
-        let key = String::from_utf8(key.to_vec()).unwrap();
+        let key = String::from_utf8(key).unwrap();
 
-        Ok(proto::Message::put(&key, &mut data.to_vec(), None))
+        match proto::Command::from(cmd[0].into()) {
+            proto::Command::PUT => Ok(Some(proto::Message::put(&key, &mut data, None))),
+            proto::Command::DELETE => Ok(Some(proto::Message::delete(&key, None))),
+            x => Err(Error::new(
+                ErrorKind::Unsupported,
+                format!("{:?} unsupported command type for WAL", x),
+            )),
+        }
+    }
 
-        // proto::nonblocking::unmarshal(Box::pin(self.fr.try_clone().await.unwrap())).await
+    pub async fn replay(&self, cc: Storage) -> Result<u64, Error> {
+        let mut result = 0u64;
+        loop {
+            match self.read_log_entry().await? {
+                Some(x) => {
+                    result = result + 1;
+                    let (key, data) = proto::split_parts(x.data.clone().unwrap());
+                    match x.command {
+                        proto::Command::PUT => cc.write(key.unwrap(), data.unwrap()).await,
+                        proto::Command::DELETE => cc.delete(key.unwrap()).await,
+                        _ => None,
+                    };
+                }
+                None => {
+                    break;
+                }
+            };
+        }
+
+        Ok(result)
     }
 
     pub fn tx(&mut self) -> UnboundedSender<proto::Message> {

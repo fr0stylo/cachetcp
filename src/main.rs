@@ -32,8 +32,17 @@ async fn main() -> std::io::Result<()> {
     if args.wal_replay {
         let v = wal::WriteAheadLog::new(&args.wal).await;
         loop {
-            println!("{:?}", v.read_log_entry().await?);
+            match v.read_log_entry().await? {
+                Some(x) => {
+                    println!("{:?}", x);
+                }
+                None => {
+                    break;
+                }
+            };
         }
+
+        return Ok(());
     }
 
     if args.client {
@@ -41,16 +50,15 @@ async fn main() -> std::io::Result<()> {
         let c = Arc::new(c);
         let cc: Arc<client::Client> = c.clone();
 
-        let mut i: u16 = 1;
+        let mut i: u128 = 1;
         c.connected().unwrap();
 
         loop {
             println!("{:?}", cc.keys()?);
+            println!("{:?}", cc.get("1")?);
+            sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             let s = i.to_be_bytes();
             println!("{:?}", cc.put("1", s.into())?);
-            return Ok(());
-            sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
-            println!("{:?}", cc.get("1")?);
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             i = i + 1;
         }
@@ -60,138 +68,22 @@ async fn main() -> std::io::Result<()> {
     let mut wal = wal::WriteAheadLog::new(&args.wal).await;
     let w = WalWritter::new(wal.tx());
 
-    let listener = TcpListener::bind(args.addr)
+    let replayed = wal
+        .replay(storage.clone())
+        .await
+        .expect("Failed to regenerate from wal");
+    println!("Regenerated from WAL: {:?}", replayed);
+
+    let listener = TcpListener::bind(args.addr.clone())
         .await
         .expect("failed to bind port");
+
+    println!("Starting server on {}", args.addr);
+
     loop {
         tokio::select! {
             _ = wal.write() => {},
             _ = server::functional::initiate_client(&listener, storage.clone(), w.clone()) => {}
         }
     }
-    // v.add_to_log(proto::Message::ping()).await?;
-    // v.add_to_log(proto::Message::ping()).await?;
-    // v.add_to_log(proto::Message::get("123", Option::None))
-    //     .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::put(
-    //     "asdf",
-    //     &mut vec![1, 2, 2],
-    //     Option::None,
-    // ))
-    // .await?;
-    // v.add_to_log(proto::Message::ping()).await?;
 }

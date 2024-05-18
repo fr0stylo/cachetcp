@@ -97,7 +97,6 @@ impl Messages for Message {
                     .as_millis(),
             ))
             .unwrap();
-        println!("{:?}", data);
         let mut buf: Vec<u8> = key.into();
         buf.append(&mut Message::separator());
         buf.append(data);
@@ -318,4 +317,19 @@ pub fn resolve_pair(input: Vec<u8>) -> Vec<Vec<u8>> {
         acc.last_mut().unwrap().push(x);
         acc
     })
+}
+
+pub fn split_parts(data: Vec<u8>) -> (Option<String>, Option<Vec<u8>>) {
+    let parts = resolve_pair(data);
+
+    let key = String::from_utf8(parts.first().unwrap().to_vec()).unwrap();
+
+    if parts.len() > 1 {
+        return (
+            Some(key.to_owned()),
+            parts.last().unwrap().to_owned().into(),
+        );
+    }
+
+    (Some(key.to_owned()), None)
 }
