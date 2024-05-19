@@ -10,7 +10,7 @@ use tokio::{
 use crate::{
     proto::{self, Messages},
     storage::storage::Storage,
-    wal::WalWritter,
+    persistance::wal::WalWritter,
 };
 
 pub async fn initiate_client(

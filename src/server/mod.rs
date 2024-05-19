@@ -9,7 +9,6 @@ use std::{
 
 use crate::proto::{self, Messages};
 
-pub mod nonblocking;
 pub mod functional;
 
 type Cache = Arc<Mutex<HashMap<String, Vec<u8>>>>;
