@@ -22,7 +22,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     wal_replay: bool,
 
-    #[arg(short, long, default_value_t = (r#"127.0.0.1:7070"#.to_string()))]
+    #[arg(short, long, default_value_t = (r#"0.0.0.0:7070"#.to_string()))]
     addr: String,
 
     #[arg(long, default_value_t = ("./wal.log".to_string()))]
@@ -56,7 +56,7 @@ async fn main() -> std::io::Result<()> {
     }
 
     if args.client {
-        let c = client::Client::new(&args.addr);
+        let c = client::Client::new("192.168.1.107:7070");
         let c = Arc::new(c);
         let cc: Arc<client::Client> = c.clone();
 
