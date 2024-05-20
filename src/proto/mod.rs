@@ -262,18 +262,10 @@ pub fn unmarshal_raw(reader: &mut dyn Read) -> Result<Message, Error> {
     // reader.read_exact(&mut buf)?;
     msg.length = usize::from_be_bytes(buf[20..28].try_into().unwrap());
 
-    // if msg.length >= buf.len().try_into().unwrap() {
-    //     return Err(Error::new(
-    //         ErrorKind::InvalidData,
-    //         "incorrent data provided",
-    //     ));
-    // }
-
     let mut v: Vec<u8> = vec![0; msg.length.try_into().unwrap()];
     let buf = v.as_mut_slice();
     reader.read_exact(buf)?;
-    // let mut v: Vec<u8> = vec![0];
-    // reader.read_to_end(&mut v);
+
     msg.data = Some(buf.try_into().unwrap());
 
     return Ok(msg);

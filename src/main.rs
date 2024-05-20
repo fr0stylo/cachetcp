@@ -11,7 +11,7 @@ use cachetcp::{
 };
 use clap::{arg, command, Parser};
 use rand::Rng;
-use tokio::{net::TcpListener, time::interval};
+use tokio::{join, net::TcpListener, time::interval};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -64,11 +64,10 @@ async fn main() -> std::io::Result<()> {
         c.connected().unwrap();
 
         loop {
-            println!("{:?}", cc.keys()?);
-            println!("{:?}", cc.get(format!("{}", i % 26).as_str())?);
+            println!("{:?}", cc.get(format!("{:?}", i).as_str()).unwrap());
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             let s = i.to_be_bytes();
-            println!("{:?}", cc.put(format!("{}", i % 26).as_str(), s.into())?);
+            println!("{:?}", cc.put(format!("{}", i).as_str(), s.into()).unwrap());
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             i = i + 1;
         }
