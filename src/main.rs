@@ -1,4 +1,7 @@
-use std::{sync::Arc, thread::sleep, time::{Duration, SystemTime}};
+use std::{
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 use cachetcp::{
     client,
@@ -7,11 +10,14 @@ use cachetcp::{
         wal::{self, WalWritter},
     },
     server,
-    storage::storage::Storage,
+    storage::{expirable::ExpirationController, storage::Storage},
 };
 use clap::{arg, command, Parser};
-use rand::Rng;
-use tokio::{net::TcpListener, time::interval};
+use rand::{thread_rng, Rng};
+use tokio::{
+    net::TcpListener,
+    time::{interval, timeout},
+};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -22,7 +28,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     wal_replay: bool,
 
-    #[arg(short, long, default_value_t = (r#"0.0.0.0:7070"#.to_string()))]
+    #[arg(short, long, default_value_t = ("0.0.0.0:7070".to_string()))]
     addr: String,
 
     #[arg(long, default_value_t = ("./wal.log".to_string()))]
@@ -40,16 +46,32 @@ async fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     if args.wal_replay {
-        let v = wal::WriteAheadLog::new(&args.wal).await;
+        // let v = wal::WriteAheadLog::new(&args.wal).await;
+        // loop {
+        //     match v.read_log_entry().await? {
+        //         Some(x) => {
+        //             println!("{:?}", x);
+        //         }
+        //         None => {
+        //             break;
+        //         }
+        //     };
+        // }
+        let mut ctrl = ExpirationController::new();
+        let t = SystemTime::now();
         loop {
-            match v.read_log_entry().await? {
-                Some(x) => {
-                    println!("{:?}", x);
+            let val = thread_rng().gen::<u64>() % 20;
+            ctrl.add_expiration(format!("{}", val).as_str(), Duration::from_secs(val));
+
+            tokio::select! {
+                key = timeout(Duration::from_secs(1), ctrl.wait()) => {
+                    println!("{:?} : {:?}", t.elapsed(), key);
+                },
+                else => {
+                    println!("{:?}",val);
+                    ctrl.add_expiration(format!("{}",val).as_str(), Duration::from_secs(val));
                 }
-                None => {
-                    break;
-                }
-            };
+            }
         }
 
         return Ok(());
@@ -57,8 +79,6 @@ async fn main() -> std::io::Result<()> {
 
     if args.client {
         let c = client::asyncronius::Client::new(&args.addr).await;
-        let c = Arc::new(c);
-        // let cc: Arc<client::Client> = c.clone();
 
         let mut i: u64 = 1;
         let _ = c.connected().await;
