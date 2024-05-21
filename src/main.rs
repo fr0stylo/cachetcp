@@ -84,16 +84,16 @@ async fn main() -> std::io::Result<()> {
         let _ = c.connected().await;
 
         loop {
-            let t = SystemTime::now();
-            println!("{:?}", c.get(format!("{:?}", i).as_str()).await);
-            print!("{:?}", t.elapsed());
-
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             let s = i.to_be_bytes();
             let t = SystemTime::now();
             println!("{:?}", c.put(format!("{}", i).as_str(), s.into()).await);
             print!("{:?}", t.elapsed());
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
+
+            let t = SystemTime::now();
+            println!("{:?}", c.get(format!("{:?}", i).as_str()).await);
+            print!("{:?}", t.elapsed());
             i = i + 1;
         }
     }
