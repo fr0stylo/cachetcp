@@ -1,9 +1,8 @@
-use std::{io::Error, pin::Pin};
+use std::io::Error;
 
 use tokio::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{AsyncSeekExt, AsyncWriteExt},
-    sync::Mutex,
 };
 
 use crate::{proto, storage::storage::Storage};
@@ -47,6 +46,8 @@ impl SnapshotCreator {
         let mut result = 0u64;
         let reader = OpenOptions::new()
             .read(true)
+            .write(true)
+            .create(true)
             .open(self.path.clone())
             .await?;
         loop {

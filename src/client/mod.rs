@@ -13,16 +13,19 @@ use std::{
 
 use crate::proto::{self, Messages};
 
+pub mod asyncronius;
+
 type ReceverQueue = Arc<Mutex<HashMap<u128, Sender<proto::Message>>>>;
 
 #[derive(Debug)]
 pub struct Client {
     sock: TcpStream,
     queue: ReceverQueue,
+    timeout: u64,
 }
 
 impl Client {
-    pub fn new(addr: &str) -> Self {
+    pub fn new(addr: &str, timeout: Option<u64>) -> Self {
         let sck = TcpStream::connect(addr).unwrap();
         sck.set_nodelay(true).unwrap();
         let q = Arc::new(Mutex::new(HashMap::<u128, Sender<proto::Message>>::new()));
@@ -39,6 +42,7 @@ impl Client {
         return Client {
             sock: sck,
             queue: q,
+            timeout: timeout.or(Some(1)).unwrap(),
         };
     }
 
@@ -64,13 +68,11 @@ impl Client {
         let mut ww = self.sock.try_clone().unwrap();
         let (tx, rx) = channel::<proto::Message>();
 
-        {
-            self.queue.lock().unwrap().insert(msg.ts, tx);
-        }
+        self.queue.lock().unwrap().insert(msg.ts, tx);
 
         proto::marshal(&mut msg, &mut ww)?;
 
-        let result = match rx.recv_timeout(Duration::from_secs(1)) {
+        let result = match rx.recv_timeout(Duration::from_secs(self.timeout)) {
             Ok(result) => {
                 print!("{:?}", t.elapsed());
 

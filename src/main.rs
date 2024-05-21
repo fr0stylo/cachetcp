@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread::sleep, time::Duration};
+use std::{sync::Arc, thread::sleep, time::{Duration, SystemTime}};
 
 use cachetcp::{
     client,
@@ -11,7 +11,7 @@ use cachetcp::{
 };
 use clap::{arg, command, Parser};
 use rand::Rng;
-use tokio::{join, net::TcpListener, time::interval};
+use tokio::{net::TcpListener, time::interval};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -56,18 +56,23 @@ async fn main() -> std::io::Result<()> {
     }
 
     if args.client {
-        let c = client::Client::new("192.168.1.107:7070");
+        let c = client::asyncronius::Client::new(&args.addr).await;
         let c = Arc::new(c);
-        let cc: Arc<client::Client> = c.clone();
+        // let cc: Arc<client::Client> = c.clone();
 
         let mut i: u64 = 1;
-        c.connected().unwrap();
+        let _ = c.connected().await;
 
         loop {
-            println!("{:?}", cc.get(format!("{:?}", i).as_str()).unwrap());
+            let t = SystemTime::now();
+            println!("{:?}", c.get(format!("{:?}", i).as_str()).await);
+            print!("{:?}", t.elapsed());
+
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             let s = i.to_be_bytes();
-            println!("{:?}", cc.put(format!("{}", i).as_str(), s.into()).unwrap());
+            let t = SystemTime::now();
+            println!("{:?}", c.put(format!("{}", i).as_str(), s.into()).await);
+            print!("{:?}", t.elapsed());
             sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
             i = i + 1;
         }
