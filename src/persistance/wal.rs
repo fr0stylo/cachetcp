@@ -63,13 +63,7 @@ impl WriteAheadLog {
     ) -> Result<(), Error> {
         let buf = write_key_val_buf(key, data, Some(cmd))?;
 
-        self.fw
-            .lock()
-            .await
-            .try_clone()
-            .await?
-            .write_all(&buf)
-            .await
+        self.fw.lock().await.write_all(&buf).await
     }
 
     pub async fn read_log_entry(&self) -> Result<Option<proto::Message>, Error> {

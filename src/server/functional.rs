@@ -16,10 +16,11 @@ use crate::{
 pub async fn initiate_client(
     listener: &TcpListener,
     cc: &Arc<Storage>,
-    wal: WalWritter,
+    wal: &WalWritter,
 ) -> Result<(), io::Error> {
     let (mut stream, _) = listener.accept().await?;
     let cc = cc.clone();
+    let wal = wal.clone();
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(5));
         let (tx, mut rx) = unbounded_channel::<proto::Message>();

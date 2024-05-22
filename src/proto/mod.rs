@@ -1,6 +1,6 @@
 use std::{
     io::{BufReader, BufWriter, Error, ErrorKind, Read, Write},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 pub mod nonblocking;
@@ -24,7 +24,7 @@ impl Message {
 
 pub trait Messages {
     fn delete(key: &str, ts: Option<u128>) -> Message;
-    fn put(key: &str, data: &mut Vec<u8>, ts: Option<u128>) -> Message;
+    fn put(key: &str, data: &mut Vec<u8>, ts: Option<Duration>) -> Message;
     fn ping() -> Message;
     fn pong() -> Message;
     fn connected() -> Message;
@@ -88,15 +88,7 @@ impl Messages for Message {
             ts: ts,
         }
     }
-    fn put(key: &str, data: &mut Vec<u8>, ts: Option<u128>) -> Message {
-        let ts = ts
-            .or(Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis(),
-            ))
-            .unwrap();
+    fn put(key: &str, data: &mut Vec<u8>, ts: Option<Duration>) -> Message {
         let mut buf: Vec<u8> = key.into();
         buf.append(&mut Message::separator());
         buf.append(data);
@@ -104,7 +96,7 @@ impl Messages for Message {
         Message {
             version: VERSION,
             command: Command::PUT,
-            ts: ts,
+            ts: 0,
             length: buf.len(),
             data: Some(buf),
         }

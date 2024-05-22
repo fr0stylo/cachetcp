@@ -100,9 +100,7 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    // let ctrl = Arc::new(ExpirationController::new());
-    let storage = Storage::new();
-    let storage = Arc::new(storage);
+    let storage = Arc::new(Storage::new());
     let ss = snapshot::SnapshotCreator::new(&args.snapshot).await;
     let mut wal = wal::WriteAheadLog::new(&args.wal).await;
     let w = WalWritter::new(wal.tx());
@@ -132,8 +130,12 @@ async fn main() -> std::io::Result<()> {
                 println!("Snapshot created: {:?} keys saved", keys);
             },
             _ = storage.expire() => {},
-            _ = wal.write() => {},
-            _ = server::functional::initiate_client(&listener, &storage, w.clone()) => {}
+            res = wal.write() => {
+                res.expect("Failed to write WAL entry")
+            },
+            res = server::functional::initiate_client(&listener, &storage, &w) => {
+                res.expect("Failed initiate client")
+            }
         }
     }
 }

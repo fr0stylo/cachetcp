@@ -26,8 +26,7 @@ impl Storage {
 
     pub async fn write_ex(&self, key: String, data: Vec<u8>, exp: Duration) -> Option<Vec<u8>> {
         let (_, res) = tokio::join!(
-            self.expiration
-                .add_expiration(&key, Duration::from_secs(10)),
+            self.expiration.add_expiration(&key, exp),
             self.write(&key, data),
         );
 
