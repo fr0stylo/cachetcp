@@ -4,3 +4,5 @@ pub mod server;
 
 pub mod persistance;
 pub mod storage;
+
+pub mod cli;
