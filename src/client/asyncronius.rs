@@ -1,4 +1,3 @@
-use rand::prelude::*;
 use std::{
     collections::HashMap,
     io::{Error, ErrorKind},
@@ -46,7 +45,6 @@ impl Client {
                         match msg {
                             Ok(msg) => match msg.command {
                                 proto::Command::PING => {
-                                    println!("{:?}", msg);
                                     let _ = spawn_sender.send(proto::Message::pong());
                                 }
                                 proto::Command::RECV => match qq.lock().unwrap().get(&msg.ts) {
@@ -54,7 +52,7 @@ impl Client {
                                         let _ = tx.send(msg);
                                     },
                                     None => {
-                                        println!("chan not found");
+                                        eprint!("chan not found");
                                     },
                                 }
                                 _ => {}
@@ -70,7 +68,7 @@ impl Client {
                                 break;
                             }
                             Err(e) => {
-                                println!("{:?}", e)
+                                eprint!("{:?}", e)
                             }
                         }
                     }

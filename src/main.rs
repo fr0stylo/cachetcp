@@ -1,4 +1,5 @@
 use std::{
+    sync::Arc,
     thread::sleep,
     time::{Duration, SystemTime},
 };
@@ -57,11 +58,12 @@ async fn main() -> std::io::Result<()> {
         //         }
         //     };
         // }
-        let mut ctrl = ExpirationController::new();
+        let ctrl = ExpirationController::new();
         let t = SystemTime::now();
         loop {
             let val = thread_rng().gen::<u64>() % 20;
-            ctrl.add_expiration(format!("{}", val).as_str(), Duration::from_secs(val));
+            ctrl.add_expiration(format!("{}", val).as_str(), Duration::from_secs(val))
+                .await;
 
             tokio::select! {
                 key = timeout(Duration::from_secs(1), ctrl.wait()) => {
@@ -69,12 +71,12 @@ async fn main() -> std::io::Result<()> {
                 },
                 else => {
                     println!("{:?}",val);
-                    ctrl.add_expiration(format!("{}",val).as_str(), Duration::from_secs(val));
+                    ctrl.add_expiration(format!("{}",val).as_str(), Duration::from_secs(val)).await;
                 }
             }
         }
 
-        return Ok(());
+        // return Ok(());
     }
 
     if args.client {
@@ -98,17 +100,16 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // let ctrl = Arc::new(ExpirationController::new());
     let storage = Storage::new();
+    let storage = Arc::new(storage);
     let ss = snapshot::SnapshotCreator::new(&args.snapshot).await;
     let mut wal = wal::WriteAheadLog::new(&args.wal).await;
     let w = WalWritter::new(wal.tx());
 
-    let keys = ss
-        .restore(storage.clone())
-        .await
-        .expect("failed snapshot restore");
+    let keys = ss.restore(&storage).await.expect("failed snapshot restore");
     let replayed = wal
-        .replay(storage.clone())
+        .replay(&storage)
         .await
         .expect("Failed to regenerate from wal");
     println!("Regenerated keys snapshot: {:?}", keys);
@@ -125,13 +126,14 @@ async fn main() -> std::io::Result<()> {
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let keys = ss.snapshot(storage.clone()).await?;
+                let keys = ss.snapshot(&storage).await?;
                 wal.clear().await?;
 
                 println!("Snapshot created: {:?} keys saved", keys);
             },
+            _ = storage.expire() => {},
             _ = wal.write() => {},
-            _ = server::functional::initiate_client(&listener, storage.clone(), w.clone()) => {}
+            _ = server::functional::initiate_client(&listener, &storage, w.clone()) => {}
         }
     }
 }

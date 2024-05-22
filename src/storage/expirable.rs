@@ -2,13 +2,17 @@ use std::{
     collections::BinaryHeap,
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
-use tokio::time::Instant;
+use tokio::{
+    sync::Mutex,
+    time::{timeout, Instant},
+};
 
-#[derive(PartialEq, Eq, Debug, PartialOrd)]
+#[derive(PartialEq, Eq, Debug, PartialOrd, Clone)]
 struct Expirable {
     id: String,
     expires_at: Instant,
@@ -40,9 +44,9 @@ impl Expirable {
     }
 }
 
-type PriotiryQueue = BinaryHeap<Expirable>;
+type PriotiryQueue = Arc<Mutex<Vec<Expirable>>>;
 
-impl Future for &Expirable {
+impl Future for Expirable {
     type Output = String;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<String> {
@@ -55,29 +59,45 @@ impl Future for &Expirable {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ExpirationController {
     queue: PriotiryQueue,
 }
 
+// pub trait ExpirationHandler {
+//     fn new() -> Self;
+
+//     async fn add_expiration(&self, key: &str, exp: Duration);
+
+//     async fn wait(&self) -> Option<String>;
+// }
+
 impl ExpirationController {
     pub fn new() -> Self {
         Self {
-            queue: BinaryHeap::new(),
+            queue: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    pub fn add_expiration(&mut self, key: &str, exp: Duration) {
+    pub async fn add_expiration(&self, key: &str, exp: Duration) {
         self.queue
+            .lock()
+            .await
             .push(Expirable::new(key.to_owned(), Instant::now() + exp));
     }
 
-    pub async fn wait(&mut self) -> Option<String> {
-        match self.queue.peek() {
-            Some(next) => {
-                let res = next.await;
-                self.queue.pop();
-                Some(res)
-            }
+    pub async fn wait(&self) -> Option<String> {
+        let mut g = self.queue.lock().await;
+        let mut q = BinaryHeap::from_iter(g.iter());
+        let item = q.pop();
+        match item {
+            Some(item) => match timeout(Duration::from_millis(1), item.clone()).await {
+                Ok(x) => {
+                    *g = q.into_iter().map(|x| x.clone()).collect();
+                    Some(x)
+                }
+                Err(_) => None,
+            },
             None => None,
         }
     }

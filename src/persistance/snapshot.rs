@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::{io::Error, sync::Arc};
 
 use tokio::{
     fs::OpenOptions,
@@ -20,7 +20,7 @@ impl SnapshotCreator {
         }
     }
 
-    pub async fn snapshot(&self, cc: Storage) -> Result<u64, Error> {
+    pub async fn snapshot(&self, cc: &Arc<Storage>) -> Result<u64, Error> {
         let mut fw = OpenOptions::new()
             .write(true)
             .create(true)
@@ -42,7 +42,7 @@ impl SnapshotCreator {
         Ok(keys.len().try_into().unwrap())
     }
 
-    pub async fn restore(&self, cc: Storage) -> Result<u64, Error> {
+    pub async fn restore(&self, cc: &Arc<Storage>) -> Result<u64, Error> {
         let mut result = 0u64;
         let reader = OpenOptions::new()
             .read(true)
@@ -56,7 +56,7 @@ impl SnapshotCreator {
                     result = result + 1;
                     let (key, data) = proto::split_parts(x.data.clone().unwrap());
                     match x.command {
-                        proto::Command::PUT => cc.write(key.unwrap(), data.unwrap()).await,
+                        proto::Command::PUT => cc.write(&key.unwrap(), data.unwrap()).await,
                         _ => None,
                     };
                 }

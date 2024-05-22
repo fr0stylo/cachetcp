@@ -1,4 +1,4 @@
-use std::{io::Error, pin::Pin};
+use std::{io::Error, pin::Pin, sync::Arc};
 
 use tokio::{
     fs::{File, OpenOptions},
@@ -103,7 +103,7 @@ impl WriteAheadLog {
         // }
     }
 
-    pub async fn replay(&self, cc: Storage) -> Result<u64, Error> {
+    pub async fn replay(&self, cc: &Arc<Storage>) -> Result<u64, Error> {
         let mut result = 0u64;
         loop {
             match self.read_log_entry().await? {
@@ -111,7 +111,7 @@ impl WriteAheadLog {
                     result = result + 1;
                     let (key, data) = proto::split_parts(x.data.clone().unwrap());
                     match x.command {
-                        proto::Command::PUT => cc.write(key.unwrap(), data.unwrap()).await,
+                        proto::Command::PUT => cc.write(&key.unwrap(), data.unwrap()).await,
                         proto::Command::DELETE => cc.delete(key.unwrap()).await,
                         _ => None,
                     };

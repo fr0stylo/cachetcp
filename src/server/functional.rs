@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use tokio::{
     io,
@@ -15,10 +15,11 @@ use crate::{
 
 pub async fn initiate_client(
     listener: &TcpListener,
-    cc: Storage,
+    cc: &Arc<Storage>,
     wal: WalWritter,
 ) -> Result<(), io::Error> {
     let (mut stream, _) = listener.accept().await?;
+    let cc = cc.clone();
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(5));
         let (tx, mut rx) = unbounded_channel::<proto::Message>();
@@ -39,7 +40,7 @@ pub async fn initiate_client(
               msg = proto::nonblocking::unmarshal(Box::pin(tcprx))  => {
                   match msg {
                       Ok(msg) => {
-                        handle_message(msg, cc.clone(), tx.clone(), &wal).await.unwrap();
+                        handle_message(msg, &cc, tx.clone(), &wal).await.unwrap();
                       },
                       Err(_) => {}
                 }
@@ -53,7 +54,7 @@ pub async fn initiate_client(
 
 pub async fn handle_message(
     msg: proto::Message,
-    cc: Storage,
+    cc: &Arc<Storage>,
     rw: UnboundedSender<proto::Message>,
     wal: &WalWritter,
 ) -> Result<(), io::Error> {
@@ -79,7 +80,8 @@ pub async fn handle_message(
 
             let key = String::from_utf8(parts.first().unwrap().to_vec()).unwrap();
 
-            tokio::join!(cc.write(key.to_owned(), parts.last().unwrap().to_owned().into()),);
+            cc.write(&key, parts.last().unwrap().to_owned().into())
+                .await;
 
             wal.write(&msgg);
 

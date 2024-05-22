@@ -146,7 +146,7 @@ fn message_handle(mut sock: TcpStream, q: ReceverQueue) -> std::io::Result<()> {
                 }
                 proto::Command::RECV => match q.lock().unwrap().get(&msg.ts) {
                     Some(tx) => tx.send(msg).unwrap(),
-                    None => println!("chan not found"),
+                    None => eprintln!("chan not found"),
                 },
                 _ => {}
             },
@@ -161,7 +161,7 @@ fn message_handle(mut sock: TcpStream, q: ReceverQueue) -> std::io::Result<()> {
                 break Ok(());
             }
             Err(e) => {
-                println!("{:?}", e)
+                eprintln!("{:?}", e)
             }
         }
     }

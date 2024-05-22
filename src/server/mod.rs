@@ -37,14 +37,14 @@ impl Server {
                     let _ = thread::Builder::new()
                         .spawn(move || match handle_connection(&mut stream, &mut cache) {
                             Err(e) => {
-                                println!("{:?}", e)
+                                eprintln!("{:?}", e)
                             }
                             Ok(_) => {}
                         })
                         .expect("Failed to spawn thread");
                 }
                 Err(e) => {
-                    println!("{}", e);
+                    eprintln!("{}", e);
                     continue;
                 }
             }
@@ -59,8 +59,6 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
     loop {
         match proto::unmarshal(&mut ws) {
             Ok(msg) => {
-                println!("{:?}", msg);
-
                 match msg.command {
                     proto::Command::PING => {
                         let mut ss = stream.try_clone().unwrap();
@@ -154,7 +152,7 @@ fn handle_connection(mut stream: &mut TcpStream, cache_entity: &mut Cache) -> Re
                 break Ok(());
             }
             Err(e) => {
-                println!("{:?}", e)
+                eprintln!("{:?}", e)
             }
         }
     }
