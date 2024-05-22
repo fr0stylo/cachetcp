@@ -12,6 +12,8 @@ To run client: `cargo run -- client`
 
 ## TODO
 
-- [] Add expiration
-- [] Add subscription model
-- [] Add interactive CLI client
+- [ ] Add expiration
+  - [x] Initial expiration implementation
+  - [ ] Add client side support for expiration
+- [ ] Add subscription model
+- [ ] Add interactive CLI client
