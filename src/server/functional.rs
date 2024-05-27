@@ -9,7 +9,7 @@ use tokio::{
 
 use crate::{
     persistance::wal::WalWritter,
-    proto::{self, Messages},
+    proto::{self},
     storage::storage::Storage,
 };
 
@@ -21,14 +21,15 @@ pub async fn initiate_client(
     let (mut stream, _) = listener.accept().await?;
     let cc = cc.clone();
     let wal = wal.clone();
+    stream.set_nodelay(true).expect("Failed to set no delay");
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(5));
-        let (tx, mut rx) = unbounded_channel::<proto::Message>();
+        let (tx, mut rx) = unbounded_channel::<proto::FrameMessage>();
         loop {
             let (tcprx, mut tcptx) = stream.split();
             tokio::select! {
               _ = ticker.tick() => {
-                let _ = tx.send(proto::Message::ping()).unwrap();
+                let _ = tx.send(proto::CommandMessage::PING().into()).unwrap();
               },
               res = rx.recv() => {
                 match res {
@@ -41,7 +42,7 @@ pub async fn initiate_client(
               msg = proto::nonblocking::unmarshal(Box::pin(tcprx))  => {
                   match msg {
                       Ok(msg) => {
-                        handle_message(msg, &cc, tx.clone(), &wal).await.unwrap();
+                        handle_message(&msg, &cc, tx.clone(), &wal).await.unwrap();
                       },
                       Err(_) => {}
                 }
@@ -54,59 +55,49 @@ pub async fn initiate_client(
 }
 
 pub async fn handle_message(
-    msg: proto::Message,
+    msg: &proto::FrameMessage,
     cc: &Arc<Storage>,
-    rw: UnboundedSender<proto::Message>,
+    rw: UnboundedSender<proto::FrameMessage>,
     wal: &WalWritter,
 ) -> Result<(), io::Error> {
-    match msg.command {
-        proto::Command::CONNECTED => {
-            let _ = rw.send(proto::Message::recv(None, Some(msg.ts)));
+    match msg.clone().command {
+        proto::CommandMessage::CONNECTED() => {
+            let _ = rw.send(msg.reply_borrow(None));
         }
-        proto::Command::GET => {
-            let key = String::from_utf8(msg.data.unwrap()).unwrap();
-
-            let data = match cc.read(key).await {
+        proto::CommandMessage::GET(key) => {
+            let data = match cc.read(&key).await {
                 Some(x) => x.to_owned(),
                 None => Vec::<u8>::new(),
             };
-            let _ = rw.send(proto::Message::recv(
-                Option::Some(data),
-                Option::Some(msg.ts),
-            ));
+            let _ = rw.send(msg.reply_borrow(Some(data)));
         }
-        proto::Command::PUT => {
-            let msgg = msg.clone();
-            let parts = proto::resolve_pair(msg.data.unwrap());
+        proto::CommandMessage::PUT(key, data, exp) => {
+            match exp {
+                Some(x) => {
+                    cc.write_ex(&key, data, x).await;
+                }
+                None => {
+                    cc.write(&key, data).await;
+                }
+            }
 
-            let key = String::from_utf8(parts.first().unwrap().to_vec()).unwrap();
+            wal.write(&msg);
 
-            cc.write(&key, parts.last().unwrap().to_owned().into())
-                .await;
-
-            wal.write(&msgg);
-
-            let _ = rw.send(proto::Message::recv(Option::None, Option::Some(msg.ts)));
+            let _ = rw.send(msg.reply_borrow(None));
         }
-        proto::Command::KEYS => {
+        proto::CommandMessage::KEYS() => {
             let keys: Vec<String> = cc.keys().await.map(|x| x.clone()).unwrap();
 
-            let keys = keys.join("\0");
-
-            let _ = rw.send(proto::Message::recv(
-                Option::Some(keys.into_bytes()),
-                Option::Some(msg.ts),
-            ));
+            let buf = rmp_serde::encode::to_vec(&keys).unwrap();
+            let _ = rw.send(msg.reply_borrow(Some(buf)));
         }
-        proto::Command::DELETE => {
-            let key = String::from_utf8(msg.clone().data.unwrap()).unwrap();
-
+        proto::CommandMessage::DELETE(key) => {
             cc.delete(key).await;
-            wal.write(&msg.clone());
+            //     wal.write(&msg.clone());
 
-            let _ = rw.send(proto::Message::recv(Option::None, Option::Some(msg.ts)));
+            let _ = rw.send(msg.reply_borrow(None));
         }
-        proto::Command::DEFAULT => {}
+        proto::CommandMessage::RECV(_) => todo!(),
         _ => {}
     };
 

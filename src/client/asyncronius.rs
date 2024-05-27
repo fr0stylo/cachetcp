@@ -3,19 +3,20 @@ use std::{
     io::{Error, ErrorKind},
     ops::Add,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::{
     net::TcpStream,
     sync::mpsc::{unbounded_channel, UnboundedSender},
 };
 
-use crate::proto::{self, Messages};
+use crate::proto::{self};
 
-type ReceverQueue = Arc<Mutex<HashMap<u128, UnboundedSender<proto::Message>>>>;
+type ReceverQueue = Arc<Mutex<HashMap<u128, UnboundedSender<proto::FrameMessage>>>>;
 
 #[derive(Debug)]
 pub struct Client {
-    tx: UnboundedSender<proto::Message>,
+    tx: UnboundedSender<proto::FrameMessage>,
     queue: ReceverQueue,
     msg_idx: Mutex<u128>,
 }
@@ -24,11 +25,12 @@ impl Client {
     pub async fn new(addr: &str) -> Self {
         let mut sck = TcpStream::connect(addr).await.unwrap();
         sck.set_nodelay(true).unwrap();
-        let q = Arc::new(Mutex::new(
-            HashMap::<u128, UnboundedSender<proto::Message>>::new(),
-        ));
+        let q = Arc::new(Mutex::new(HashMap::<
+            u128,
+            UnboundedSender<proto::FrameMessage>,
+        >::new()));
         let qq = q.clone();
-        let (ctx, mut crx) = unbounded_channel::<proto::Message>();
+        let (ctx, mut crx) = unbounded_channel::<proto::FrameMessage>();
         let spawn_sender = ctx.clone();
         tokio::spawn(async move {
             let qq = qq;
@@ -43,18 +45,30 @@ impl Client {
                     }
                     msg = proto::nonblocking::unmarshal(Box::pin(read)) => {
                         match msg {
+                            // proto::Command::PING => {
+                            //     let _ = spawn_sender.send(proto::Message::pong());
+                            // }
+                            // proto::Command::RECV => match qq.lock().unwrap().get(&msg.ts) {
+                            //     Some(tx) => {
+                            //         let _ = tx.send(msg);
+                            //     },
+                            //     None => {
+                            //         eprint!("chan not found");
+                            //     },
+                            // }
+                            // _ => {}
                             Ok(msg) => match msg.command {
-                                proto::Command::PING => {
-                                    let _ = spawn_sender.send(proto::Message::pong());
-                                }
-                                proto::Command::RECV => match qq.lock().unwrap().get(&msg.ts) {
-                                    Some(tx) => {
-                                        let _ = tx.send(msg);
+                                proto::CommandMessage::PING() => {
+                                let _ = spawn_sender.send(proto::CommandMessage::PONG().into());
+                                },
+                                proto::CommandMessage::RECV(_) => match qq.lock().unwrap().get(&msg.ts) {
+                                        Some(tx) => {
+                                            let _ = tx.send(msg);
+                                        },
+                                        None => {
+                                            eprint!("chan not found");
+                                        },
                                     },
-                                    None => {
-                                        eprint!("chan not found");
-                                    },
-                                }
                                 _ => {}
                             },
                             Err(e) if e.kind() == ErrorKind::Unsupported => {}
@@ -84,11 +98,11 @@ impl Client {
     }
 
     pub fn ping(&self) -> Result<(), Error> {
-        let _ = self.tx.send(proto::Message::ping());
+        let _ = self.tx.send(proto::CommandMessage::PING().into());
         Ok(())
     }
 
-    async fn rpc(&self, msg: proto::Message) -> Result<Vec<u8>, Error> {
+    async fn rpc(&self, msg: proto::FrameMessage) -> Result<Vec<u8>, Error> {
         // let t = SystemTime::now();
         let count: u128;
         {
@@ -100,43 +114,49 @@ impl Client {
         let mut msg = msg.clone();
         msg.ts = count;
 
-        let (tx, mut rx) = unbounded_channel::<proto::Message>();
+        let (tx, mut rx) = unbounded_channel::<proto::FrameMessage>();
         self.queue.lock().unwrap().insert(count, tx);
 
         let _ = self.tx.send(msg.clone());
 
         let result = match rx.recv().await {
-            Some(result) => Ok(result.data.or(Some(Vec::new().to_owned())).unwrap()),
-            None => Ok(vec![0u8; 0]),
+            Some(result) => match result.command {
+                proto::CommandMessage::RECV(data) => data.or(Some(Vec::<u8>::new())),
+                _ => Some(Vec::<u8>::new()),
+            },
+            None => Some(Vec::<u8>::new()),
         };
 
         self.queue.lock().unwrap().remove(&msg.ts);
 
-        return result;
+        return Ok(result.unwrap());
     }
 
     pub async fn connected(&self) -> Result<Vec<u8>, Error> {
-        let msg = proto::Message::connected();
+        let msg = proto::CommandMessage::CONNECTED().into();
 
         self.rpc(msg).await
     }
 
     pub async fn get(&self, key: &str) -> Result<Vec<u8>, Error> {
-        let msg = proto::Message::get(key, None);
+        let msg = proto::CommandMessage::GET(key.to_owned()).into();
 
         self.rpc(msg).await
     }
 
-    pub async fn put(&self, key: &str, data: Vec<u8>) -> Result<Vec<u8>, Error> {
-        let mut data = data.clone();
-
-        let msg = proto::Message::put(key, &mut data, None);
+    pub async fn put(
+        &self,
+        key: &str,
+        data: Vec<u8>,
+        exp: Option<Duration>,
+    ) -> Result<Vec<u8>, Error> {
+        let msg = proto::CommandMessage::PUT(key.to_owned(), data, exp).into();
 
         self.rpc(msg).await
     }
 
     pub async fn keys(&self) -> Result<Vec<String>, Error> {
-        let msg = proto::Message::keys(None);
+        let msg = proto::CommandMessage::KEYS().into();
 
         match self.rpc(msg).await {
             Ok(data) => {
@@ -152,7 +172,7 @@ impl Client {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), Error> {
-        let msg = proto::Message::delete(key, None);
+        let msg = proto::CommandMessage::DELETE(key.to_owned()).into();
 
         match self.rpc(msg).await {
             Ok(_) => Ok(()),

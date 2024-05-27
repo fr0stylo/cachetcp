@@ -5,9 +5,11 @@ use tokio::{
     io::{AsyncSeekExt, AsyncWriteExt},
 };
 
-use crate::{proto, storage::storage::Storage};
+use crate::proto::CommandMessage::PUT;
+use crate::proto::FrameMessage;
+use crate::storage::storage::Storage;
 
-use super::{read_log_entry, write_key_val_buf};
+use super::read_log_entry;
 
 pub struct SnapshotCreator {
     path: String,
@@ -32,8 +34,11 @@ impl SnapshotCreator {
         fw.rewind().await?;
 
         for key in keys.clone().into_iter() {
-            let res = cc.read(key.clone()).await.unwrap();
-            let buf = write_key_val_buf(&key, res, Some(proto::Command::PUT))?;
+            let res = cc.read(&key).await.unwrap();
+            let cmd: FrameMessage = PUT(key.clone(), res, None).into();
+            let cmd: Vec<u8> = cmd.into();
+            let mut buf: Vec<u8> = cmd.len().to_be_bytes().to_vec();
+            buf.extend(cmd);
             fw.write_all(&buf).await?;
         }
 
@@ -54,9 +59,17 @@ impl SnapshotCreator {
             match read_log_entry(reader.try_clone().await?).await? {
                 Some(x) => {
                     result = result + 1;
-                    let (key, data) = proto::split_parts(x.data.clone().unwrap());
                     match x.command {
-                        proto::Command::PUT => cc.write(&key.unwrap(), data.unwrap()).await,
+                        PUT(key, data, exp) => {
+                            match exp {
+                                None => {
+                                    cc.write(&key, data).await
+                                }
+                                Some(x) => {
+                                    cc.write_ex(&key, data, exp.unwrap()).await
+                                }
+                            }
+                        }
                         _ => None,
                     };
                 }

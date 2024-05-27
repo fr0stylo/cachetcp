@@ -4,6 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use cachetcp::proto::testing;
 use cachetcp::{
     cli, client,
     persistance::{
@@ -15,32 +16,10 @@ use cachetcp::{
 };
 use clap::{arg, command, Parser};
 use rand::{thread_rng, Rng};
-use tokio::{
-    net::TcpListener,
-    time::{interval, timeout},
-};
-
-// #[derive(Parser, Debug)]
-// #[command(version, about, long_about = None)]
-// struct Args {
-//     #[arg(short, long, default_value_t = false)]
-//     client: bool,
-
-//     #[arg(short, long, default_value_t = false)]
-//     wal_replay: bool,
-
-//     #[arg(short, long, default_value_t = ("0.0.0.0:7070".to_string()))]
-//     addr: String,
-
-//     #[arg(long, default_value_t = ("./wal.log".to_string()))]
-//     wal: String,
-
-//     #[arg(long, default_value_t = ("./storage.log".to_string()))]
-//     snapshot: String,
-
-//     #[arg(long, default_value_t = 2)]
-//     snapshot_internal: u64,
-// }
+use rand::prelude::SliceRandom;
+use serde::{Deserialize, Serialize};
+use tokio::{fs, net::TcpListener, time::{interval, timeout}};
+use tokio::fs::OpenOptions;
 
 async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
     let storage = Arc::new(Storage::new());
@@ -72,7 +51,7 @@ async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
 
                 println!("Snapshot created: {:?} keys saved", keys);
             },
-            _ = storage.expire() => {},
+            // _ = storage.expire() => {},
             res = wal.write() => {
                 res.expect("Failed to write WAL entry")
             },
@@ -83,45 +62,67 @@ async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct TestData {
+    #[serde(alias = "postId")]
+    post_id: u64,
+    id: u64,
+    name: String,
+    email: String,
+    body: String,
+}
+
 async fn handle_client(args: &cli::Args) -> Result<(), std::io::Error> {
+    use serde_json::{Result, Value};
+
+    let test_data = fs::read_to_string("./test_data.json").await?;
+    let test_data: Vec<TestData> = serde_json::from_str(test_data.as_str())?;
+
     let c = client::asyncronius::Client::new(&args.addr).await;
 
     let mut i: u64 = 1;
     let _ = c.connected().await;
+    let mut rng = thread_rng();
 
     loop {
         sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
         let s = i.to_be_bytes();
+        let buf = serde_json::to_vec(&test_data.choose(&mut rng)).unwrap();
         let t = SystemTime::now();
-        println!("{:?}", c.put(format!("{}", i).as_str(), s.into()).await);
-        print!("{:?}", t.elapsed());
+        let res = c.put(format!("{}", i).as_str(), buf, None).await;
+
+        println!("PUT {:?} {:?}", t.elapsed(), res);
         sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
 
         let t = SystemTime::now();
-        println!("{:?}", c.get(format!("{:?}", i).as_str()).await);
-        print!("{:?}", t.elapsed());
+        let res = c.get(format!("{:?}", i).as_str()).await;
+        let buf: TestData = serde_json::from_slice(res.unwrap().as_slice()).unwrap();
+        println!("GET {:?} {:?}", t.elapsed(), buf);
+
         i = i + 1;
     }
 }
 
 async fn handle_testing(args: &cli::Args) -> Result<(), std::io::Error> {
-    let ctrl = ExpirationController::new();
-    let t = SystemTime::now();
-    loop {
-        let val = thread_rng().gen::<u64>() % 20;
-        ctrl.add_expiration(format!("{}", val).as_str(), Duration::from_secs(val))
-            .await;
-
-        tokio::select! {
-            key = timeout(Duration::from_secs(1), ctrl.wait()) => {
-                println!("{:?} : {:?}", t.elapsed(), key);
-            },
-            else => {
-                println!("{:?}",val);
-                ctrl.add_expiration(format!("{}",val).as_str(), Duration::from_secs(val)).await;
-            }
-        }
-    }
+    // let ctrl = ExpirationController::new();
+    // let t = SystemTime::now();
+    // loop {
+    //     let val = thread_rng().gen::<u64>() % 20;
+    //     ctrl.add_expiration(format!("{}", val).as_str(), Duration::from_secs(val))
+    //         .await;
+    //
+    //     tokio::select! {
+    //         key = timeout(Duration::from_secs(1), ctrl.wait()) => {
+    //             println!("{:?} : {:?}", t.elapsed(), key);
+    //         },
+    //         else => {
+    //             println!("{:?}",val);
+    //             ctrl.add_expiration(format!("{}",val).as_str(), Duration::from_secs(val)).await;
+    //         }
+    //     }
+    // }
+    testing();
+    Ok(())
 }
 
 #[tokio::main]
@@ -130,6 +131,7 @@ async fn main() -> std::io::Result<()> {
 
     match args.subcommand {
         cli::Runtime::Client => handle_client(&args).await,
+        // cli::Runtime::Client => cli::start_interactive(),
         cli::Runtime::Testing => handle_testing(&args).await,
         cli::Runtime::Server => handle_server(&args).await,
         _ => handle_server(&args).await,
