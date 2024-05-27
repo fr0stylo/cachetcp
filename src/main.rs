@@ -12,14 +12,13 @@ use cachetcp::{
         wal::{self, WalWritter},
     },
     server,
-    storage::{expirable::ExpirationController, storage::Storage},
+    storage::storage::Storage,
 };
-use clap::{arg, command, Parser};
+use clap::Parser;
 use rand::{thread_rng, Rng};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
-use tokio::{fs, net::TcpListener, time::{interval, timeout}};
-use tokio::fs::OpenOptions;
+use tokio::{fs, net::TcpListener, time::interval};
 
 async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
     let storage = Arc::new(Storage::new());
@@ -73,7 +72,7 @@ struct TestData {
 }
 
 async fn handle_client(args: &cli::Args) -> Result<(), std::io::Error> {
-    use serde_json::{Result, Value};
+    
 
     let test_data = fs::read_to_string("./test_data.json").await?;
     let test_data: Vec<TestData> = serde_json::from_str(test_data.as_str())?;

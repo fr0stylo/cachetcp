@@ -1,4 +1,5 @@
 use std::{sync::Arc, time::Duration};
+use std::io::ErrorKind;
 
 use tokio::{
     io,
@@ -41,10 +42,21 @@ pub async fn initiate_client(
             },
               msg = proto::nonblocking::unmarshal(Box::pin(tcprx))  => {
                   match msg {
-                      Ok(msg) => {
+                    Ok(msg) => {
                         handle_message(&msg, &cc, tx.clone(), &wal).await.unwrap();
-                      },
-                      Err(_) => {}
+                    },
+                    Err(e) if e.kind() == ErrorKind::ConnectionAborted => {
+                        break;
+                    },
+                    Err(e) if e.kind() == ErrorKind::ConnectionReset => {
+                        break;
+                    },
+                    Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+                        break;
+                    },
+                    Err(e) => {
+                        eprintln!("{:?}", e)
+                    }
                 }
               }
             }
