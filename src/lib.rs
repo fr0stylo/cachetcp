@@ -1,3 +1,4 @@
+#![feature(hash_extract_if)]
 extern crate core;
 
 pub mod client;

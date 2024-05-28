@@ -19,6 +19,7 @@ use rand::{thread_rng, Rng};
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::TcpListener, time::interval};
+use cachetcp::proto::CommandMessage::DELETE;
 
 async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
     let storage = Arc::new(Storage::new());
@@ -41,22 +42,22 @@ async fn handle_server(args: &cli::Args) -> Result<(), std::io::Error> {
     println!("Starting server on {}", args.addr);
 
     let mut ticker = interval(Duration::from_secs(args.snapshot_internal * 60));
-
+    let mut tx = wal.tx();
     loop {
         tokio::select! {
+            res = server::functional::initiate_client(&listener, &storage, &w) => {
+                res.expect("Failed initiate client")
+            }
             _ = ticker.tick() => {
                 let keys = ss.snapshot(&storage).await?;
                 wal.clear().await?;
 
                 println!("Snapshot created: {:?} keys saved", keys);
             },
-            // _ = storage.expire() => {},
             res = wal.write() => {
                 res.expect("Failed to write WAL entry")
             },
-            res = server::functional::initiate_client(&listener, &storage, &w) => {
-                res.expect("Failed initiate client")
-            }
+            _ = storage.expire(&mut tx) => {},
         }
     }
 }
@@ -72,8 +73,6 @@ struct TestData {
 }
 
 async fn handle_client(args: &cli::Args) -> Result<(), std::io::Error> {
-    
-
     let test_data = fs::read_to_string("./test_data.json").await?;
     let test_data: Vec<TestData> = serde_json::from_str(test_data.as_str())?;
 
@@ -88,15 +87,22 @@ async fn handle_client(args: &cli::Args) -> Result<(), std::io::Error> {
         let s = i.to_be_bytes();
         let buf = serde_json::to_vec(&test_data.choose(&mut rng)).unwrap();
         let t = SystemTime::now();
-        let res = c.put(format!("{}", i).as_str(), buf, None).await;
+        let res = c.put(format!("{}", i).as_str(), buf, Some(Duration::from_secs(i % 40 + 1))).await;
 
         println!("PUT {:?} {:?}", t.elapsed(), res);
         sleep(Duration::from_millis(rand::thread_rng().gen_range(10..50)));
 
         let t = SystemTime::now();
-        let res = c.get(format!("{:?}", i).as_str()).await;
-        let buf: TestData = serde_json::from_slice(res.unwrap().as_slice()).unwrap();
-        println!("GET {:?} {:?}", t.elapsed(), buf);
+        let res = c.get(format!("{:?}", i).as_str()).await?;
+        match res {
+            None => {
+                println!("GET {:?} None", t.elapsed());
+            }
+            Some(res) => {
+                let buf: TestData = serde_json::from_slice(res.clone().as_slice())?;
+                println!("GET {:?} {:?}  {:?}", t.elapsed(), res, buf);
+            }
+        }
 
         i = i + 1;
     }

@@ -104,7 +104,7 @@ pub async fn handle_message(
             let _ = rw.send(msg.reply_borrow(Some(buf)));
         }
         proto::CommandMessage::DELETE(key) => {
-            cc.delete(key).await;
+            cc.delete(&key).await;
             //     wal.write(&msg.clone());
 
             let _ = rw.send(msg.reply_borrow(None));

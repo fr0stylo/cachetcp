@@ -6,9 +6,8 @@ type CacheStorage = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
 pub mod storage;
 
-pub mod expirable;
 
-pub trait Cache: Clone + Debug {
+pub trait Cache: Clone + Debug + Sync + Send {
     fn write(&self, key: String, data: Vec<u8>) -> Option<Vec<u8>>;
     fn read(&self, key: String) -> Option<Vec<u8>>;
     fn keys(&self) -> Option<Vec<String>>;

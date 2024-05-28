@@ -12,12 +12,12 @@ use tokio::{
 
 use crate::proto::{self};
 
-type ReceverQueue = Arc<Mutex<HashMap<u128, UnboundedSender<proto::FrameMessage>>>>;
+type ReceiverQueue = Arc<Mutex<HashMap<u128, UnboundedSender<proto::FrameMessage>>>>;
 
 #[derive(Debug)]
 pub struct Client {
     tx: UnboundedSender<proto::FrameMessage>,
-    queue: ReceverQueue,
+    queue: ReceiverQueue,
     msg_idx: Mutex<u128>,
 }
 
@@ -102,7 +102,7 @@ impl Client {
         Ok(())
     }
 
-    async fn rpc(&self, msg: proto::FrameMessage) -> Result<Vec<u8>, Error> {
+    async fn rpc(&self, msg: proto::FrameMessage) -> Result<Option<Vec<u8>>, Error> {
         // let t = SystemTime::now();
         let count: u128;
         {
@@ -121,24 +121,24 @@ impl Client {
 
         let result = match rx.recv().await {
             Some(result) => match result.command {
-                proto::CommandMessage::RECV(data) => data.or(Some(Vec::<u8>::new())),
-                _ => Some(Vec::<u8>::new()),
+                proto::CommandMessage::RECV(data) => data,
+                _ => None,
             },
-            None => Some(Vec::<u8>::new()),
+            None => None,
         };
 
         self.queue.lock().unwrap().remove(&msg.ts);
 
-        return Ok(result.unwrap());
+        return Ok(result);
     }
 
-    pub async fn connected(&self) -> Result<Vec<u8>, Error> {
+    pub async fn connected(&self) -> Result<Option<Vec<u8>>, Error> {
         let msg = proto::CommandMessage::CONNECTED().into();
 
         self.rpc(msg).await
     }
 
-    pub async fn get(&self, key: &str) -> Result<Vec<u8>, Error> {
+    pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
         let msg = proto::CommandMessage::GET(key.to_owned()).into();
 
         self.rpc(msg).await
@@ -149,23 +149,27 @@ impl Client {
         key: &str,
         data: Vec<u8>,
         exp: Option<Duration>,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         let msg = proto::CommandMessage::PUT(key.to_owned(), data, exp).into();
 
         self.rpc(msg).await
     }
 
-    pub async fn keys(&self) -> Result<Vec<String>, Error> {
+    pub async fn keys(&self) -> Result<Option<Vec<String>>, Error> {
         let msg = proto::CommandMessage::KEYS().into();
 
         match self.rpc(msg).await {
             Ok(data) => {
-                let pairs: Vec<String> = proto::resolve_pair(data)
-                    .into_iter()
-                    .map(|x| String::from_utf8(x.to_owned()).unwrap().to_owned())
-                    .collect();
-
-                Ok(pairs)
+                match data {
+                    None => Ok(None),
+                    Some(data) => {
+                        let pairs: Vec<String> = proto::resolve_pair(data)
+                            .into_iter()
+                            .map(|x| String::from_utf8(x.to_owned()).unwrap().to_owned())
+                            .collect();
+                        Ok(Some(pairs))
+                    }
+                }
             }
             Err(e) => Err(e),
         }

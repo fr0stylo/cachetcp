@@ -83,7 +83,7 @@ impl WriteAheadLog {
                                 }
                             }
                         }
-                        DELETE(key) => cc.delete(key).await,
+                        DELETE(key) => cc.delete(&key).await,
                         _ => None,
                     };
                 }
